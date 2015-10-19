@@ -17,7 +17,8 @@ impl typemap::Key for OriginalUrl { type Value = Url; }
 /// requests like `/foo/bar` as if they are just `/bar`. Iron's mounting middleware allows
 /// you to specify multiple mountings using one middleware instance. Requests that pass through
 /// the mounting middleware are passed along to the mounted handler that best matches the request's
-/// path. `Request::url` is modified so that requests appear to be relative to the mounted handler's route.
+/// path. `Request::url` is modified so that requests appear to be relative to the mounted handler's
+/// route.
 ///
 /// Mounted handlers may also access the *original* URL by requesting the `OriginalUrl` key
 /// from `Request::extensions`.
@@ -130,4 +131,121 @@ impl Handler for Mount {
         res
     }
 }
+
+#[cfg(test)]
+mod tests {    
+    use super::Mount;
+    use iron::{Request, Response, IronResult, Url};
+    use iron::status;
+    use hyper::method::Method;
+    use hyper::buffer::BufReader;
+    use hyper::net::NetworkStream;
+    use std::io::Cursor;
+    use iron::middleware::Handler;
+
+     fn send_hello(_: &mut Request) -> IronResult<Response> {
+        Ok(Response::with((status::Ok, "Hello!")))
+    }
+
+    #[test]
+    fn it_mounts() {
+        let mut mount = Mount::new();
+        mount.mount("/testing", send_hello);
+        let data = Cursor::new("Test".to_string().into_bytes());
+        let mut stream = mock::MockStream::new(data);
+        let mut reader = BufReader::new(&mut stream as &mut NetworkStream);
+        let mut req = mock::request::new(Method::Get, Url::parse("http://localhost/test").unwrap(),
+            &mut reader);
+        let res = mount.handle(& mut req);
+        println!("res = {:?}", res);
+        // Should fail because mount point doesn't match request...
+        assert!(res.is_err());
+    }
+
+
+    pub mod mock {
+        use hyper::net::NetworkStream;
+        use std::net::SocketAddr;
+        use std::io::{Read, Write, Result};
+        use std::any::Any;
+
+        /// A mock network stream
+        #[derive(Clone)]
+        pub struct MockStream<T> {
+            data: T
+        }
+
+        impl<T> MockStream<T> {
+            /// Create a new mock stream that reads from the given data
+            pub fn new(data: T) -> MockStream<T> {
+                MockStream { data: data }
+            }
+        }
+
+        impl<T: Send + Read + Write + Clone + Any> NetworkStream for MockStream<T> {
+            fn peer_addr(&mut self) -> Result<SocketAddr> {
+                Ok("127.0.0.1:3000".parse().unwrap())
+            }
+        }
+
+        impl<T: Read> Read for MockStream<T> {
+            fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+                self.data.read(buf)
+            }
+        }
+
+        impl<T: Write> Write for MockStream<T> {
+            fn write(&mut self, buf: &[u8]) -> Result<usize> {
+                self.data.write(buf)
+            }
+
+            fn flush(&mut self) -> Result<()> {
+                self.data.flush()
+            }
+        }
+
+        /// Contains constructors for mocking Iron Requests.
+        pub mod request {
+            use iron::{Request, TypeMap, Headers, Url};
+            use iron::request::Body;
+            use iron::{method, headers};
+
+            use hyper::http::h1::HttpReader;
+            use hyper::buffer::BufReader;
+            use hyper::net::NetworkStream;
+
+            use std::net::SocketAddr;
+
+            /// Create a new mock Request with the given method, url, and data.
+            pub fn new<'a, 'b>(method: method::Method, path: Url,
+                               reader: &'a mut BufReader<&'b mut NetworkStream>) -> Request<'a, 'b> {
+                let reader = HttpReader::EofReader(reader);
+                let addr: SocketAddr = "127.0.0.1:3000".parse().unwrap();
+
+                let mut headers = Headers::new();
+                let host = Url::parse("http://127.0.0.1:3000").unwrap()
+                    .into_generic_url()
+                    .serialize_host().unwrap();
+
+                headers.set(headers::Host {
+                    hostname: host,
+                    port: Some(3000),
+                });
+
+                headers.set(headers::UserAgent("iron-test".to_string()));
+
+                Request {
+                    method: method,
+                    url: path,
+                    body: Body::new(reader),
+                    local_addr: addr.clone(),
+                    remote_addr: addr,
+                    headers: headers,
+                    extensions: TypeMap::new()
+                }
+            }
+        }
+    }
+}
+
 

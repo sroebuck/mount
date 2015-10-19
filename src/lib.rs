@@ -7,6 +7,8 @@
 extern crate iron;
 extern crate url;
 extern crate sequence_trie;
+extern crate hyper;
+extern crate typemap;
 
 pub use mount::{Mount, OriginalUrl};
 
