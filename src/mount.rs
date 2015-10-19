@@ -136,30 +136,38 @@ impl Handler for Mount {
 mod tests {    
     use super::Mount;
     use iron::{Request, Response, IronResult, Url};
-    use iron::status;
     use hyper::method::Method;
     use hyper::buffer::BufReader;
     use hyper::net::NetworkStream;
     use std::io::Cursor;
     use iron::middleware::Handler;
 
-     fn send_hello(_: &mut Request) -> IronResult<Response> {
-        Ok(Response::with((status::Ok, "Hello!")))
+    fn send_hello(_: &mut Request) -> IronResult<Response> {
+        Ok(Response::new())
     }
 
     #[test]
     fn it_mounts() {
         let mut mount = Mount::new();
         mount.mount("/testing", send_hello);
-        let data = Cursor::new("Test".to_string().into_bytes());
+        mount.mount("/another/file.png", send_hello);
+        assert!(test_url_matches(&mount, "http://localhost/testing"));
+        assert!(test_url_matches(&mount, "http://localhost/testing/"));
+        assert!(test_url_matches(&mount, "http://localhost/testing/something"));
+        assert!(! test_url_matches(&mount, "http://localhost/test"));
+        assert!(! test_url_matches(&mount, "http://localhost/test/testing"));
+        assert!(test_url_matches(&mount, "http://localhost/another/file.png"));
+        assert!(! test_url_matches(&mount, "http://localhost/another/file.jpg"));
+    }
+
+    fn test_url_matches(mount: &Mount, url: &str) -> bool {
+        let data = Cursor::new("".to_string().into_bytes());
         let mut stream = mock::MockStream::new(data);
         let mut reader = BufReader::new(&mut stream as &mut NetworkStream);
-        let mut req = mock::request::new(Method::Get, Url::parse("http://localhost/test").unwrap(),
+        let mut req = mock::request::new(Method::Get, Url::parse(url).unwrap(),
             &mut reader);
         let res = mount.handle(& mut req);
-        println!("res = {:?}", res);
-        // Should fail because mount point doesn't match request...
-        assert!(res.is_err());
+        res.is_ok()
     }
 
 
